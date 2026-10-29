@@ -11,6 +11,9 @@ public sealed class JiraSettings
     /// <summary>Jira Cloud site, e.g. https://yourcompany.atlassian.net</summary>
     public string BaseUrl { get; set; } = "";
     public string Email { get; set; } = "";
+
+    /// <summary>True for Jira Data Center / Server: Personal Access Token as Bearer, REST API v2, username-based users.</summary>
+    public bool DataCenter { get; set; }
     public string ApiToken { get; set; } = "";
 
     /// <summary>Bearer key Copilot must send to /mcp.</summary>
@@ -27,7 +30,7 @@ public sealed class JiraSettings
     public string ClaudeModel { get; set; } = DefaultClaudeModel;
 
     public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(Email) && !string.IsNullOrWhiteSpace(ApiToken);
+        !string.IsNullOrWhiteSpace(BaseUrl) && (DataCenter || !string.IsNullOrWhiteSpace(Email)) && !string.IsNullOrWhiteSpace(ApiToken);
 }
 
 /// <summary>Persists settings to App_Data/jira-settings.json; secrets are encrypted with ASP.NET Data Protection.</summary>
@@ -35,7 +38,7 @@ public sealed class JiraSettingsStore
 {
     private sealed record FileModel(
         string BaseUrl, string Email, string ProtectedApiToken, string McpKey, bool AllowWrites, string StoryPointsFieldId,
-        string? ProtectedAnthropicKey = null, string? ClaudeModel = null);
+        string? ProtectedAnthropicKey = null, string? ClaudeModel = null, bool DataCenter = false);
 
     private readonly string _path;
     private readonly IDataProtector _protector;
@@ -68,7 +71,7 @@ public sealed class JiraSettingsStore
             var model = new FileModel(
                 settings.BaseUrl, settings.Email.Trim(), Protect(settings.ApiToken),
                 settings.McpKey, settings.AllowWrites, settings.StoryPointsFieldId.Trim(),
-                Protect(settings.AnthropicApiKey), settings.ClaudeModel.Trim());
+                Protect(settings.AnthropicApiKey), settings.ClaudeModel.Trim(), settings.DataCenter);
             File.WriteAllText(_path, JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true }));
         }
     }
@@ -97,7 +100,7 @@ public sealed class JiraSettingsStore
             {
                 BaseUrl = m.BaseUrl ?? "", Email = m.Email ?? "", ApiToken = Unprotect(m.ProtectedApiToken),
                 McpKey = string.IsNullOrEmpty(m.McpKey) ? NewMcpKey() : m.McpKey,
-                AllowWrites = m.AllowWrites, StoryPointsFieldId = m.StoryPointsFieldId ?? "",
+                DataCenter = m.DataCenter, AllowWrites = m.AllowWrites, StoryPointsFieldId = m.StoryPointsFieldId ?? "",
                 AnthropicApiKey = Unprotect(m.ProtectedAnthropicKey),
                 ClaudeModel = string.IsNullOrWhiteSpace(m.ClaudeModel) ? JiraSettings.DefaultClaudeModel : m.ClaudeModel
             };
@@ -110,7 +113,7 @@ public sealed class JiraSettingsStore
 
     private static JiraSettings Clone(JiraSettings s) => new()
     {
-        BaseUrl = s.BaseUrl, Email = s.Email, ApiToken = s.ApiToken, McpKey = s.McpKey,
+        BaseUrl = s.BaseUrl, Email = s.Email, DataCenter = s.DataCenter, ApiToken = s.ApiToken, McpKey = s.McpKey,
         AllowWrites = s.AllowWrites, StoryPointsFieldId = s.StoryPointsFieldId,
         AnthropicApiKey = s.AnthropicApiKey, ClaudeModel = s.ClaudeModel
     };

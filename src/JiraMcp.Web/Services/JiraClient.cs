@@ -10,6 +10,7 @@ public sealed class JiraException(string message, HttpStatusCode? status = null)
     public HttpStatusCode? Status { get; } = status;
 }
 
+/// <summary>AccountId holds the account id on Jira Cloud and the username on Data Center.</summary>
 public sealed record JiraUser(string AccountId, string DisplayName, string? Email);
 
 public sealed record JiraIssueSummary(
@@ -32,10 +33,18 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
 
     public bool AllowWrites => store.Get().AllowWrites;
 
+    private bool DataCenter => store.Get().DataCenter;
+    private string Api => DataCenter ? "/rest/api/2" : Api + "";
+
+    /// <summary>Cloud wants Atlassian Document Format; Data Center takes plain text / wiki markup.</summary>
+    private JsonNode RichText(string text) => DataCenter ? JsonValue.Create(text)! : AdfConverter.ToAdf(text);
+
+    private static string UserId(JsonNode u) => (string?)u["accountId"] ?? (string?)u["name"] ?? (string?)u["key"] ?? "";
+
     public async Task<JiraUser> GetMyselfAsync(CancellationToken ct = default)
     {
-        var me = await SendAsync(HttpMethod.Get, "/rest/api/3/myself", null, ct);
-        return new JiraUser((string)me!["accountId"]!, (string?)me["displayName"] ?? "", (string?)me["emailAddress"]);
+        var me = await SendAsync(HttpMethod.Get, Api + "/myself", null, ct);
+        return new JiraUser(UserId(me!), (string?)me!["displayName"] ?? "", (string?)me["emailAddress"]);
     }
 
     public async Task<JiraSearchResult> SearchAsync(string jql, int maxResults, CancellationToken ct = default)
@@ -45,11 +54,18 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
         var fields = "summary,status,issuetype,priority,assignee,reporter,created,updated" + (spField is null ? "" : "," + spField);
 
         var issues = new List<JiraIssueSummary>();
+        if (DataCenter)
+        {
+            var dc = await SendAsync(HttpMethod.Get, $"{Api}/search?jql={Uri.EscapeDataString(jql)}&startAt=0&maxResults={maxResults}&fields={fields}", null, ct);
+            foreach (var i in dc!["issues"]!.AsArray()) issues.Add(ToSummary(i!, spField));
+            return new JiraSearchResult(issues.Count, ((int?)dc["total"] ?? 0) > issues.Count, [.. issues]);
+        }
+
         string? token = null;
         bool more;
         do
         {
-            var url = $"/rest/api/3/search/jql?jql={Uri.EscapeDataString(jql)}&maxResults={maxResults - issues.Count}&fields={fields}";
+            var url = $"{Api}/search/jql?jql={Uri.EscapeDataString(jql)}&maxResults={maxResults - issues.Count}&fields={fields}";
             if (token is not null) url += "&nextPageToken=" + Uri.EscapeDataString(token);
             var page = await SendAsync(HttpMethod.Get, url, null, ct);
             foreach (var i in page!["issues"]!.AsArray()) issues.Add(ToSummary(i!, spField));
@@ -64,7 +80,7 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
     {
         var spField = await GetStoryPointsFieldAsync(ct);
         var fields = "summary,description,status,issuetype,priority,assignee,reporter,created,updated,labels,parent,comment" + (spField is null ? "" : "," + spField);
-        var issue = await SendAsync(HttpMethod.Get, $"/rest/api/3/issue/{Uri.EscapeDataString(key)}?fields={fields}", null, ct);
+        var issue = await SendAsync(HttpMethod.Get, $"{Api}/issue/{Uri.EscapeDataString(key)}?fields={fields}", null, ct);
         var f = issue!["fields"]!;
 
         var comments = (f["comment"]?["comments"]?.AsArray() ?? [])
@@ -85,7 +101,7 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
         EnsureWrites();
         var fields = new JsonObject();
         if (summary is not null) fields["summary"] = summary;
-        if (description is not null) fields["description"] = description.Length == 0 ? null : AdfConverter.ToAdf(description);
+        if (description is not null) fields["description"] = description.Length == 0 ? null : RichText(description);
         if (labels is not null) fields["labels"] = new JsonArray([.. labels.Select(l => (JsonNode)JsonValue.Create(l)!)]);
         if (storyPoints is not null)
         {
@@ -95,19 +111,19 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
         }
         if (fields.Count == 0) throw new JiraException("Nothing to update: provide at least one field.");
 
-        await SendAsync(HttpMethod.Put, $"/rest/api/3/issue/{Uri.EscapeDataString(key)}", new JsonObject { ["fields"] = fields }, ct);
+        await SendAsync(HttpMethod.Put, $"{Api}/issue/{Uri.EscapeDataString(key)}", new JsonObject { ["fields"] = fields }, ct);
     }
 
     public async Task AddCommentAsync(string key, string body, CancellationToken ct = default)
     {
         EnsureWrites();
-        await SendAsync(HttpMethod.Post, $"/rest/api/3/issue/{Uri.EscapeDataString(key)}/comment",
-            new JsonObject { ["body"] = AdfConverter.ToAdf(body) }, ct);
+        await SendAsync(HttpMethod.Post, $"{Api}/issue/{Uri.EscapeDataString(key)}/comment",
+            new JsonObject { ["body"] = RichText(body) }, ct);
     }
 
     public async Task<JiraTransition[]> GetTransitionsAsync(string key, CancellationToken ct = default)
     {
-        var r = await SendAsync(HttpMethod.Get, $"/rest/api/3/issue/{Uri.EscapeDataString(key)}/transitions", null, ct);
+        var r = await SendAsync(HttpMethod.Get, $"{Api}/issue/{Uri.EscapeDataString(key)}/transitions", null, ct);
         return r!["transitions"]!.AsArray()
             .Select(t => new JiraTransition((string)t!["id"]!, (string)t["name"]!, (string?)t["to"]?["name"] ?? ""))
             .ToArray();
@@ -121,7 +137,7 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
         var match = all.FirstOrDefault(t => t.Name.Equals(statusOrTransition, StringComparison.OrdinalIgnoreCase))
                  ?? all.FirstOrDefault(t => t.ToStatus.Equals(statusOrTransition, StringComparison.OrdinalIgnoreCase))
                  ?? throw new JiraException($"No transition '{statusOrTransition}' available for {key}. Available: {string.Join(", ", all.Select(t => $"{t.Name} -> {t.ToStatus}"))}");
-        await SendAsync(HttpMethod.Post, $"/rest/api/3/issue/{Uri.EscapeDataString(key)}/transitions",
+        await SendAsync(HttpMethod.Post, $"{Api}/issue/{Uri.EscapeDataString(key)}/transitions",
             new JsonObject { ["transition"] = new JsonObject { ["id"] = match.Id } }, ct);
         return match.ToStatus;
     }
@@ -135,13 +151,13 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
             ["issuetype"] = new JsonObject { ["name"] = issueType },
             ["summary"] = summary
         };
-        if (!string.IsNullOrWhiteSpace(description)) fields["description"] = AdfConverter.ToAdf(description);
+        if (!string.IsNullOrWhiteSpace(description)) fields["description"] = RichText(description);
         if (storyPoints is not null)
         {
             var sp = await GetStoryPointsFieldAsync(ct);
             if (sp is not null) fields[sp] = storyPoints;
         }
-        var r = await SendAsync(HttpMethod.Post, "/rest/api/3/issue", new JsonObject { ["fields"] = fields }, ct);
+        var r = await SendAsync(HttpMethod.Post, Api + "/issue", new JsonObject { ["fields"] = fields }, ct);
         return (string)r!["key"]!;
     }
 
@@ -151,7 +167,7 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
         if (!string.IsNullOrWhiteSpace(s.StoryPointsFieldId)) return s.StoryPointsFieldId;
         if (_storyPointsFieldFor == s.BaseUrl) return _storyPointsField;
 
-        var fields = await SendAsync(HttpMethod.Get, "/rest/api/3/field", null, ct);
+        var fields = await SendAsync(HttpMethod.Get, Api + "/field", null, ct);
         string? Find(string name) => fields!.AsArray()
             .FirstOrDefault(f => string.Equals((string?)f!["name"], name, StringComparison.OrdinalIgnoreCase))?["id"]?.GetValue<string>();
 
@@ -186,10 +202,12 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
     private async Task<JsonNode?> SendAsync(HttpMethod method, string path, JsonNode? body, CancellationToken ct)
     {
         var s = store.Get();
-        if (!s.IsConfigured) throw new JiraException("Jira is not configured. Open the JiraMcp web app and save the site URL, email and API token.");
+        if (!s.IsConfigured) throw new JiraException("Jira is not configured. Open the JiraMcp web app and save the site URL, credentials and token.");
 
         using var req = new HttpRequestMessage(method, s.BaseUrl + path);
-        req.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{s.Email}:{s.ApiToken}")));
+        req.Headers.Authorization = s.DataCenter
+            ? new AuthenticationHeaderValue("Bearer", s.ApiToken)
+            : new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{s.Email}:{s.ApiToken}")));
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (body is not null) req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
 
@@ -199,7 +217,7 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
         return string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
     }
 
-    private static string Describe(HttpStatusCode status, string text)
+    private string Describe(HttpStatusCode status, string text)
     {
         string detail = "";
         try
@@ -215,7 +233,9 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
 
         return status switch
         {
-            HttpStatusCode.Unauthorized => "Jira rejected the credentials (401). Check email and API token.",
+            HttpStatusCode.Unauthorized => DataCenter
+                ? "Jira rejected the Personal Access Token (401). Check it has not expired or been revoked, that the URL is the Jira base URL (including any context path), and that your SSO setup allows PAT/Bearer access to /rest."
+                : "Jira rejected the credentials (401). Check email and API token.",
             HttpStatusCode.Forbidden => $"Jira denied access (403). {detail}".Trim(),
             HttpStatusCode.NotFound => $"Not found in Jira (404). {detail}".Trim(),
             _ => $"Jira returned {(int)status} {status}. {detail}".Trim()

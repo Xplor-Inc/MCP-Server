@@ -164,7 +164,9 @@ public sealed partial class JiraClient
         var epic = (await SearchAsync($"key = {key}", 1, ct)).Issues.FirstOrDefault()
                    ?? throw new JiraException($"{key} was not found.");
 
-        var children = await SearchAsync($"parent = {key} ORDER BY created", 100, ct);
+        var children = DataCenter
+            ? new JiraSearchResult(0, false, [])
+            : await SearchAsync($"parent = {key} ORDER BY created", 100, ct);
         if (children.Issues.Length == 0)
         {
             // Older company-managed projects link children through the "Epic Link" field instead of parent.
@@ -182,13 +184,14 @@ public sealed partial class JiraClient
     public async Task<JiraUserMatch[]> FindUsersAsync(string query, string? issueKey, CancellationToken ct = default)
     {
         var q = Uri.EscapeDataString(query.Trim());
+        var qp = DataCenter ? "username" : "query";
         var url = string.IsNullOrWhiteSpace(issueKey)
-            ? $"/rest/api/3/user/search?query={q}&maxResults=10"
-            : $"/rest/api/3/user/assignable/search?query={q}&issueKey={Uri.EscapeDataString(RequireKey(issueKey))}&maxResults=10";
+            ? $"{Api}/user/search?{qp}={q}&maxResults=10"
+            : $"{Api}/user/assignable/search?{qp}={q}&issueKey={Uri.EscapeDataString(RequireKey(issueKey))}&maxResults=10";
         var r = await SendAsync(HttpMethod.Get, url, null, ct);
         return r!.AsArray()
             .Where(u => (u!["active"]?.GetValue<bool>() ?? true) && ((string?)u["accountType"] is null or "atlassian"))
-            .Select(u => new JiraUserMatch((string)u!["accountId"]!, (string?)u["displayName"] ?? "", (string?)u["emailAddress"]))
+            .Select(u => new JiraUserMatch(UserId(u!), (string?)u!["displayName"] ?? "", (string?)u["emailAddress"]))
             .ToArray();
     }
 
@@ -217,7 +220,7 @@ public sealed partial class JiraClient
         else
         {
             var matches = await FindUsersAsync(a, key, ct);
-            var exact = matches.Where(m => Eq(m.DisplayName, a) || Eq(m.Email, a)).ToArray();
+            var exact = matches.Where(m => Eq(m.DisplayName, a) || Eq(m.Email, a) || Eq(m.AccountId, a)).ToArray();
             var pick = exact.Length == 1 ? exact[0] : matches.Length == 1 ? matches[0] : null;
             if (pick is null)
                 throw new JiraException(matches.Length == 0
@@ -226,7 +229,7 @@ public sealed partial class JiraClient
             (accountId, label) = (pick.AccountId, pick.DisplayName);
         }
 
-        await SendAsync(HttpMethod.Put, $"/rest/api/3/issue/{key}/assignee", new JsonObject { ["accountId"] = accountId }, ct);
+        await SendAsync(HttpMethod.Put, $"{Api}/issue/{key}/assignee", new JsonObject { [DataCenter ? "name" : "accountId"] = accountId }, ct);
         return $"{key} is now assigned to: {label}.";
     }
 
@@ -234,7 +237,7 @@ public sealed partial class JiraClient
 
     public async Task<JiraLinkType[]> GetLinkTypesAsync(CancellationToken ct = default)
     {
-        var r = await SendAsync(HttpMethod.Get, "/rest/api/3/issueLinkType", null, ct);
+        var r = await SendAsync(HttpMethod.Get, Api + "/issueLinkType", null, ct);
         return r!["issueLinkTypes"]!.AsArray()
             .Select(t => new JiraLinkType((string)t!["name"]!, (string?)t["inward"] ?? "", (string?)t["outward"] ?? ""))
             .ToArray();
@@ -267,7 +270,7 @@ public sealed partial class JiraClient
             {
                 if (!f.SrcIsOutward)
                 {
-                    await SendAsync(HttpMethod.Delete, $"/rest/api/3/issueLink/{f.Id}", null, ct);
+                    await SendAsync(HttpMethod.Delete, $"{Api}/issueLink/{f.Id}", null, ct);
                     _linkSwapped = !_linkSwapped;
                     await PostLinkAsync(type.Name, src, dst, _linkSwapped, ct);
                 }
@@ -280,7 +283,7 @@ public sealed partial class JiraClient
     private Task PostLinkAsync(string typeName, string src, string dst, bool swapped, CancellationToken ct)
     {
         var (outward, inward) = swapped ? (dst, src) : (src, dst);
-        return SendAsync(HttpMethod.Post, "/rest/api/3/issueLink", new JsonObject
+        return SendAsync(HttpMethod.Post, Api + "/issueLink", new JsonObject
         {
             ["type"] = new JsonObject { ["name"] = typeName },
             ["outwardIssue"] = new JsonObject { ["key"] = outward },
@@ -290,7 +293,7 @@ public sealed partial class JiraClient
 
     private async Task<(string Id, bool SrcIsOutward)?> FindLinkAsync(string src, string dst, string typeName, CancellationToken ct)
     {
-        var issue = await SendAsync(HttpMethod.Get, $"/rest/api/3/issue/{src}?fields=issuelinks", null, ct);
+        var issue = await SendAsync(HttpMethod.Get, $"{Api}/issue/{src}?fields=issuelinks", null, ct);
         var links = issue!["fields"]?["issuelinks"]?.AsArray();
         if (links is null) return null;
 
@@ -316,7 +319,7 @@ public sealed partial class JiraClient
             throw new JiraException($"'{timeSpent}' is not a valid duration. Use Jira format such as '2h 30m', '1d' or '45m'.");
 
         var body = new JsonObject { ["timeSpent"] = timeSpent.Trim() };
-        if (!string.IsNullOrWhiteSpace(comment)) body["comment"] = AdfConverter.ToAdf(comment);
+        if (!string.IsNullOrWhiteSpace(comment)) body["comment"] = RichText(comment);
         if (!string.IsNullOrWhiteSpace(started))
         {
             if (!DateTimeOffset.TryParse(started, out var when))
@@ -325,13 +328,13 @@ public sealed partial class JiraClient
             body["started"] = when.ToString("yyyy-MM-dd'T'HH:mm:ss.fff") + when.ToString("zzz").Replace(":", "");
         }
 
-        var r = await SendAsync(HttpMethod.Post, $"/rest/api/3/issue/{key}/worklog", body, ct);
+        var r = await SendAsync(HttpMethod.Post, $"{Api}/issue/{key}/worklog", body, ct);
         return $"Logged {(string?)r?["timeSpent"] ?? timeSpent.Trim()} on {key}.";
     }
 
     public async Task<JiraWorklog[]> GetWorklogsAsync(string key, CancellationToken ct = default)
     {
-        var r = await SendAsync(HttpMethod.Get, $"/rest/api/3/issue/{RequireKey(key)}/worklog", null, ct);
+        var r = await SendAsync(HttpMethod.Get, $"{Api}/issue/{RequireKey(key)}/worklog", null, ct);
         return (r!["worklogs"]?.AsArray() ?? [])
             .Select(w => new JiraWorklog(
                 (string?)w!["author"]?["displayName"] ?? "", (string?)w["started"] ?? "",

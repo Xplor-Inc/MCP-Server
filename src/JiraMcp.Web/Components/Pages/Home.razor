@@ -8,16 +8,23 @@
 
 <h2 class="h4 mt-4">1. Jira connection</h2>
 <EditForm Model="_settings" OnValidSubmit="SaveAsync" FormName="jira-settings" class="row g-3" style="max-width:640px">
-    <div class="col-12">
-        <label class="form-label">Jira Cloud site URL</label>
-        <InputText class="form-control" @bind-Value="_settings.BaseUrl" placeholder="https://yourcompany.atlassian.net" />
+    <div class="col-12 form-check ms-2">
+        <InputCheckbox class="form-check-input" id="dataCenter" @bind-Value="_settings.DataCenter" />
+        <label class="form-check-label" for="dataCenter">Jira Data Center / Server (sign in with a Personal Access Token, e.g. behind SSO)</label>
     </div>
     <div class="col-12">
-        <label class="form-label">Atlassian account email</label>
-        <InputText class="form-control" @bind-Value="_settings.Email" />
+        <label class="form-label">@(_settings.DataCenter ? "Jira base URL" : "Jira Cloud site URL")</label>
+        <InputText class="form-control" @bind-Value="_settings.BaseUrl" placeholder="@(_settings.DataCenter ? "https://jira.yourcompany.com" : "https://yourcompany.atlassian.net")" />
     </div>
+    @if (!_settings.DataCenter)
+    {
+        <div class="col-12">
+            <label class="form-label">Atlassian account email</label>
+            <InputText class="form-control" @bind-Value="_settings.Email" />
+        </div>
+    }
     <div class="col-12">
-        <label class="form-label">API token <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">(create one)</a></label>
+        <label class="form-label">@(_settings.DataCenter ? "Personal Access Token (Profile > Personal Access Tokens)" : "API token") @if (!_settings.DataCenter) {<a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">(create one)</a>}</label>
         <InputText type="password" class="form-control" @bind-Value="_settings.ApiToken" autocomplete="off" />
         <div class="form-text">Stored encrypted in App_Data on this machine.</div>
     </div>
