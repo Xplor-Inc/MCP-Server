@@ -34,7 +34,7 @@ public sealed partial class JiraClient(IHttpClientFactory httpFactory, JiraSetti
     public bool AllowWrites => store.Get().AllowWrites;
 
     private bool DataCenter => store.Get().DataCenter;
-    private string Api => DataCenter ? "/rest/api/2" : Api + "";
+    private string Api => DataCenter ? "/rest/api/2" : "/rest/api/3";
 
     /// <summary>Cloud wants Atlassian Document Format; Data Center takes plain text / wiki markup.</summary>
     private JsonNode RichText(string text) => DataCenter ? JsonValue.Create(text)! : AdfConverter.ToAdf(text);
