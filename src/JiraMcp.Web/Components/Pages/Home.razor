@@ -1,0 +1,66 @@
+@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>Jira MCP</PageTitle>
+
+<h1>Jira MCP server</h1>
+<p>Lets GitHub Copilot (agent mode) read and update Jira through the MCP endpoint <code>@McpUrl</code>.</p>
+
+<h2 class="h4 mt-4">1. Jira connection</h2>
+<EditForm Model="_settings" OnValidSubmit="SaveAsync" FormName="jira-settings" class="row g-3" style="max-width:640px">
+    <div class="col-12">
+        <label class="form-label">Jira Cloud site URL</label>
+        <InputText class="form-control" @bind-Value="_settings.BaseUrl" placeholder="https://yourcompany.atlassian.net" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">Atlassian account email</label>
+        <InputText class="form-control" @bind-Value="_settings.Email" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">API token <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">(create one)</a></label>
+        <InputText type="password" class="form-control" @bind-Value="_settings.ApiToken" autocomplete="off" />
+        <div class="form-text">Stored encrypted in App_Data on this machine.</div>
+    </div>
+    <div class="col-12">
+        <label class="form-label">Story points field id <span class="text-muted">(optional, auto-detected)</span></label>
+        <InputText class="form-control" @bind-Value="_settings.StoryPointsFieldId" placeholder="customfield_10016" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">Anthropic API key <span class="text-muted">(for the <a href="chat">Chat</a> page)</span> <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">(create one)</a></label>
+        <InputText type="password" class="form-control" @bind-Value="_settings.AnthropicApiKey" autocomplete="off" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">Claude model</label>
+        <InputText class="form-control" @bind-Value="_settings.ClaudeModel" placeholder="claude-opus-5-5" />
+        <div class="form-text">Try <code>claude-sonnet-5-5</code> or <code>claude-haiku-5-5</code> for lower cost.</div>
+    </div>
+    <div class="col-12 form-check ms-2">
+        <InputCheckbox class="form-check-input" id="allowWrites" @bind-Value="_settings.AllowWrites" />
+        <label class="form-check-label" for="allowWrites">Allow changes (update, comment, transition, create). Untick for read-only.</label>
+    </div>
+    <div class="col-12 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn btn-outline-secondary" type="button" @onclick="TestAsync" disabled="@_testing">Test connection</button>
+    </div>
+</EditForm>
+
+@if (_message is not null)
+{
+    <div class="alert @(_ok ? "alert-success" : "alert-danger") mt-3" style="max-width:640px">@_message</div>
+}
+
+<h2 class="h4 mt-5">2. Connect Copilot</h2>
+<p>
+    Create <code>.vscode/mcp.json</code> in your workspace (or run <em>MCP: Open User Configuration</em> for all workspaces),
+    then open Copilot Chat in <strong>Agent</strong> mode and start the server.
+</p>
+<pre class="p-3 bg-light border rounded" style="max-width:640px">@ConfigSnippet</pre>
+<button class="btn btn-outline-secondary btn-sm" @onclick="RegenerateKeyAsync">Regenerate MCP key</button>
+<span class="text-muted ms-2">Update mcp.json afterwards.</span>
+
+<h2 class="h4 mt-5">Try asking Copilot</h2>
+<ul>
+    <li>"List all Jira issues I created that are still unresolved."</li>
+    <li>"Change the title of ABC-123 to 'Add retry to payment webhook'."</li>
+    <li>"Set story points on ABC-123 to 5 and move it to In Progress."</li>
+</ul>

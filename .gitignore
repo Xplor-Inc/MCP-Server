@@ -426,3 +426,8 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# Local secrets and per-machine files (never commit)
+App_Data/
+.vscode/mcp.json
+.mcp.json

@@ -1,0 +1,166 @@
+@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>DB MCP</PageTitle>
+
+<h1>Database MCP server</h1>
+<p>
+    Lets GitHub Copilot (agent mode) and the <a href="chat">Chat</a> page explore and query your databases through the MCP endpoint
+    <code>@McpUrl</code>. Connections are read-only unless you switch writes on for that connection.
+</p>
+
+<h2 class="h4 mt-4">1. Connections</h2>
+
+@if (_connections.Count == 0)
+{
+    <p class="text-muted">No connections yet. Add one below, or import them from an appsettings.json.</p>
+}
+else
+{
+    <div class="table-responsive" style="max-width:900px">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr><th>Name</th><th>Engine</th><th>Server / database</th><th>Access</th><th>Max rows</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _connections)
+                {
+                    var (server, db) = c.Describe();
+                    <tr>
+                        <td><strong>@c.Name</strong></td>
+                        <td>@c.Provider</td>
+                        <td>@server <span class="text-muted">/ @db</span></td>
+                        <td>
+                            @if (!c.AllowWrites) { <span class="badge text-bg-secondary">read-only</span> }
+                            else if (!c.AllowSchemaChanges) { <span class="badge text-bg-warning">writes</span> }
+                            else { <span class="badge text-bg-danger">writes + schema</span> }
+                        </td>
+                        <td>@c.MaxRows</td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => TestAsync(c.Name)" disabled="@(_testing == c.Name)">Test</button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(c)">Edit</button>
+                            @if (_confirmRemove == c.Name)
+                            {
+                                <button class="btn btn-danger btn-sm" @onclick="() => Remove(c.Name)">Confirm remove</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="@(() => { _confirmRemove = c.Name; })">Remove</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_message is not null)
+{
+    <div class="alert @(_ok ? "alert-success" : "alert-danger")" style="max-width:900px">@_message</div>
+}
+
+<h3 class="h5 mt-4">@(_editing ? $"Edit connection '{_form.OriginalName}'" : "Add a connection")</h3>
+<EditForm Model="_form" OnValidSubmit="Save" FormName="connection" class="row g-3" style="max-width:700px">
+    <div class="col-sm-6">
+        <label class="form-label">Name</label>
+        <InputText class="form-control" @bind-Value="_form.Name" placeholder="local-mysql" />
+        <div class="form-text">Letters, digits, - _ . only. This is what Copilot and the chat call it.</div>
+    </div>
+    <div class="col-sm-6">
+        <label class="form-label">Engine</label>
+        <InputSelect class="form-select" @bind-Value="_form.Provider">
+            <option value="@DbProvider.MySql">MySQL / MariaDB</option>
+            <option value="@DbProvider.SqlServer">SQL Server</option>
+        </InputSelect>
+    </div>
+    <div class="col-12">
+        <label class="form-label">Connection string</label>
+        <InputText class="form-control" @bind-Value="_form.ConnectionString" autocomplete="off"
+                   placeholder="@(_editing ? "Leave blank to keep the saved one" : ExampleConnectionString)" />
+        <div class="form-text">
+            Stored encrypted in App_Data and shown masked afterwards. Example: <code>@ExampleConnectionString</code>
+        </div>
+    </div>
+    <div class="col-sm-6">
+        <label class="form-label">Max rows per query</label>
+        <InputNumber class="form-control" @bind-Value="_form.MaxRows" />
+    </div>
+    <div class="col-sm-6">
+        <label class="form-label">Query timeout (seconds)</label>
+        <InputNumber class="form-control" @bind-Value="_form.TimeoutSeconds" />
+    </div>
+    <div class="col-12 form-check ms-2">
+        <InputCheckbox class="form-check-input" id="allowWrites" @bind-Value="_form.AllowWrites" />
+        <label class="form-check-label" for="allowWrites">Allow writes (INSERT / UPDATE / DELETE through db_execute). Off = read-only.</label>
+    </div>
+    <div class="col-12 form-check ms-2">
+        <InputCheckbox class="form-check-input" id="allowSchema" @bind-Value="_form.AllowSchemaChanges" disabled="@(!_form.AllowWrites)" />
+        <label class="form-check-label" for="allowSchema">Also allow schema changes (CREATE / ALTER / DROP TABLE / TRUNCATE)</label>
+    </div>
+    <div class="col-12 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">@(_editing ? "Save changes" : "Add connection")</button>
+        @if (_editing)
+        {
+            <button class="btn btn-outline-secondary" type="button" @onclick="CancelEdit">Cancel</button>
+        }
+    </div>
+</EditForm>
+<p class="text-muted mt-3" style="max-width:700px">
+    For a hard guarantee, connect with a database login that only has SELECT permission. The read-only checks here are a safety net,
+    not a substitute for database permissions.
+</p>
+
+<h3 class="h5 mt-4">Import from appsettings.json</h3>
+<div class="row g-2" style="max-width:900px">
+    <div class="col-md-6">
+        <input class="form-control" @bind="_importPath" placeholder="D:\Projects\MyApp\appsettings.Development.json" />
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" @bind="_importProvider">
+            <option value="@DbProvider.MySql">as MySQL</option>
+            <option value="@DbProvider.SqlServer">as SQL Server</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <button class="btn btn-outline-primary" @onclick="Import">Import</button>
+    </div>
+</div>
+<div class="form-text">Reads the <code>ConnectionStrings</code> section on this machine. Imported connections start read-only.</div>
+@if (_importMessage is not null)
+{
+    <div class="alert @(_importOk ? "alert-success" : "alert-danger") mt-2" style="max-width:900px">@_importMessage</div>
+}
+
+<h2 class="h4 mt-5">2. Claude chat (optional)</h2>
+<div class="row g-3" style="max-width:700px">
+    <div class="col-12">
+        <label class="form-label">Anthropic API key <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">(create one)</a></label>
+        <input type="password" class="form-control" @bind="_anthropicKey" autocomplete="off" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">Claude model</label>
+        <input class="form-control" @bind="_claudeModel" placeholder="claude-opus-5-5" />
+        <div class="form-text">Try <code>claude-sonnet-5-5</code> or <code>claude-haiku-5-5</code> for lower cost.</div>
+    </div>
+    <div class="col-12">
+        <button class="btn btn-primary" @onclick="SaveAi">Save</button>
+        @if (_aiMessage is not null) { <span class="ms-2 text-success">@_aiMessage</span> }
+    </div>
+</div>
+
+<h2 class="h4 mt-5">3. Connect Copilot</h2>
+<p>
+    Create <code>.vscode/mcp.json</code> in the folder you open in VS Code (or run <em>MCP: Open User Configuration</em> to use it everywhere),
+    then use Copilot Chat in <strong>Agent</strong> mode and start the server.
+</p>
+<pre class="p-3 bg-light border rounded" style="max-width:700px">@ConfigSnippet</pre>
+<button class="btn btn-outline-secondary btn-sm" @onclick="RegenerateKey">Regenerate MCP key</button>
+<span class="text-muted ms-2">Update mcp.json afterwards.</span>
+
+<h2 class="h4 mt-5">Try asking</h2>
+<ul>
+    <li>"What tables are in local-mysql, and which are the biggest?"</li>
+    <li>"Describe the Consignments table and show me how many rows were created this month."</li>
+    <li>"Why is this query slow?" (then paste it, and it will use db_explain)</li>
+</ul>

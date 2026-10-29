@@ -1,0 +1,50 @@
+@page "/chat"
+@rendermode InteractiveServer
+@implements IDisposable
+
+<PageTitle>Chat - DB MCP</PageTitle>
+
+<div class="chat-header">
+    <h1 class="h3 mb-0">Chat with your databases</h1>
+    <button class="btn btn-outline-secondary btn-sm" @onclick="Session.Reset" disabled="@Session.Busy">New chat</button>
+</div>
+
+<div class="chat-log" id="chat-log">
+    @if (Session.Transcript.Count == 0)
+    {
+        <div class="chat-empty">
+            Try: <em>what tables are in my database?</em>, <em>describe the Users table</em>, or <em>how many orders were created this month?</em>
+            Anything that changes data asks for your approval first.
+        </div>
+    }
+
+    @foreach (var item in Session.Transcript)
+    {
+        <div class="msg msg-@item.Role.ToString().ToLowerInvariant()">@item.Text</div>
+    }
+
+    @if (Session.PendingApproval is { } pending)
+    {
+        <div class="approval">
+            <strong>Claude wants to change data:</strong>
+            <ul>
+                @foreach (var call in pending)
+                {
+                    <li><code>@call.Name</code> <span class="args">@call.Arguments</span></li>
+                }
+            </ul>
+            <button class="btn btn-success btn-sm" @onclick="Session.Approve">Approve</button>
+            <button class="btn btn-outline-danger btn-sm ms-1" @onclick="Session.Deny">Decline</button>
+        </div>
+    }
+    else if (Session.Busy)
+    {
+        <div class="msg msg-tool">Working...</div>
+    }
+    <div id="chat-end"></div>
+</div>
+
+<form class="chat-input" @onsubmit="SendAsync">
+    <input class="form-control" @bind="_input" @bind:event="oninput" placeholder="Ask about your data..." autocomplete="off" disabled="@Session.Busy" />
+    <button class="btn btn-primary" type="submit" disabled="@(Session.Busy || string.IsNullOrWhiteSpace(_input))">Send</button>
+</form>
