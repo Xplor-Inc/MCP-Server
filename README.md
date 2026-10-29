@@ -1,6 +1,6 @@
 # MCP Servers
 
-Two Blazor Web Apps (.NET 10) that each host an [MCP](https://modelcontextprotocol.io) server for GitHub Copilot (VS Code agent mode) and also include a chat page powered by Claude.
+Two Blazor Web Apps (.NET 8) that each host an [MCP](https://modelcontextprotocol.io) server for GitHub Copilot (VS Code agent mode) and also include a chat page powered by Claude.
 
 | App | What it does | Port | Docs |
 |---|---|---|---|

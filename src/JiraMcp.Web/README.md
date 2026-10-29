@@ -1,6 +1,6 @@
 ﻿# Jira MCP
 
-Blazor Web App (.NET 10) that hosts an MCP server at `/mcp` so GitHub Copilot (VS Code agent mode) can work with Jira Cloud.
+Blazor Web App (.NET 8) that hosts an MCP server at `/mcp` so GitHub Copilot (VS Code agent mode) can work with Jira Cloud.
 
 ## Run
     dotnet run --project src/JiraMcp.Web --urls http://localhost:5289

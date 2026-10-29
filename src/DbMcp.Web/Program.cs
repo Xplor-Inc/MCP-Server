@@ -26,7 +26,7 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseStatusCodePagesWithReExecute("/not-found");
 
 // This app holds database connection strings and can run SQL, so it only answers requests from this machine.
 app.Use(async (ctx, next) =>
@@ -61,7 +61,7 @@ app.Use(async (ctx, next) =>
 
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+app.UseStaticFiles();
 app.MapMcp("/mcp");
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

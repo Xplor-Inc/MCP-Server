@@ -1,6 +1,6 @@
 ﻿# DB MCP
 
-Blazor Web App (.NET 10) that hosts an MCP server at `/mcp` so GitHub Copilot (VS Code agent mode) can explore and query MySQL / MariaDB and SQL Server databases, plus a `/chat` page that does the same with Claude.
+Blazor Web App (.NET 8) that hosts an MCP server at `/mcp` so GitHub Copilot (VS Code agent mode) can explore and query MySQL / MariaDB and SQL Server databases, plus a `/chat` page that does the same with Claude.
 
 ## Run
     dotnet run --project src/DbMcp.Web

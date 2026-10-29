@@ -26,7 +26,7 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseStatusCodePagesWithReExecute("/not-found");
 
 // /mcp is guarded by the bearer key shown on the home page, so a website open in the browser can't drive Jira through it.
 app.Use(async (ctx, next) =>
@@ -48,7 +48,7 @@ app.Use(async (ctx, next) =>
 
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+app.UseStaticFiles();
 app.MapMcp("/mcp");
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
